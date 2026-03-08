@@ -1,0 +1,9 @@
+{
+    "name": "voice-assistant-dev",
+    "image": "python:3.10",
+    "features": {
+      "ghcr.io/devcontainers/features/python:1": {}
+    },
+    "postCreateCommand": "apt update && apt install -y espeak libsndfile1 ffmpeg build-essential && pip install TTS fastapi uvicorn"
+  }
+  

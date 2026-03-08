@@ -1,0 +1,8 @@
+gTTS
+fastapi
+uvicorn
+openai 
+groq
+faster-whisper
+python-dotenv
+python-multipart
