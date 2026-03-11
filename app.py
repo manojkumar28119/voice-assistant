@@ -1,11 +1,12 @@
 from fastapi import FastAPI, UploadFile, Form, BackgroundTasks
-from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse, FileResponse
 from transcribe import transcribe_audio
 from speak import synthesize_speech
 from llm import get_llm_response
 import os
 import shutil
 import logging
+import base64
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -48,10 +49,18 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = None, text
     logger.info(f"LLM reply: '{reply}'")
 
     logger.info("Synthesizing speech...")
-    output_path = synthesize_speech(reply)
+    output_path = await synthesize_speech(reply)
     logger.info(f"Speech synthesis complete, saved to {output_path}")
+
+    # Read the audio file and encode to base64
+    with open(output_path, "rb") as audio_file:
+        audio_base64 = base64.b64encode(audio_file.read()).decode('utf-8')
 
     if output_path:
         background_tasks.add_task(cleanup, audio_path, output_path)
 
-    return FileResponse(output_path, media_type="audio/wav")
+    return JSONResponse(content={
+        "text": reply,
+        "audio": audio_base64,
+        "media_type": "audio/mpeg"
+    })

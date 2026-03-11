@@ -1,3 +1,13 @@
+---
+title: Voice Assistant API
+emoji: 🎙️
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+app_port: 7860
+---
+
 # Speech-to-Speech AI Voice Assistant
 
 A lightweight **Speech-to-Speech (S2S)** voice assistant built with **FastAPI**, **Faster-Whisper** for speech-to-text, **Groq (Llama 3)** for natural language processing, and **gTTS** for text-to-speech.
