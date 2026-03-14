@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, Form, BackgroundTasks
+from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, Header, HTTPException, Depends
 from fastapi.responses import JSONResponse, FileResponse
 from transcribe import transcribe_audio
 from speak import synthesize_speech
@@ -7,11 +7,58 @@ import os
 import shutil
 import logging
 import base64
+from jose import jwt
+from dotenv import load_dotenv
+import requests
+
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+if not SUPABASE_URL:
+    raise ValueError("SUPABASE_URL environment variable is not set")
+
+_jwks_cache = None
+
+def get_jwks():
+    global _jwks_cache
+    if _jwks_cache is None:
+        try:
+            url = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            _jwks_cache = response.json()
+        except Exception as e:
+            logger.error(f"Failed to fetch JWKS: {e}")
+            raise HTTPException(status_code=500, detail="Authentication service unreachable")
+    return _jwks_cache
+
+def verify_user(authorization: str = Header(None)):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing token")
+    
+    token = authorization.split(" ")[1]
+    jwks = get_jwks()
+    
+    try:
+        unverified_header = jwt.get_unverified_header(token)
+        key = next(
+            k for k in jwks["keys"]
+            if k["kid"] == unverified_header.get("kid")
+        )
+        payload = jwt.decode(
+            token,
+            key,
+            algorithms=["ES256"],
+            audience="authenticated"
+        )
+        return payload
+    except Exception as e:
+        logger.error(f"Token validation failed: {str(e)}")
+        raise HTTPException(status_code=401, detail="Invalid token")
 app = FastAPI()
 
 def cleanup(*file_paths: str):
@@ -24,7 +71,7 @@ def cleanup(*file_paths: str):
                 logger.error(f"Error deleting file {path}: {e}")
 
 @app.post("/chat")
-async def chat(background_tasks: BackgroundTasks, audio: UploadFile = None, text: str = Form(None)):
+async def chat(background_tasks: BackgroundTasks, payload: dict = Depends(verify_user), audio: UploadFile = None, text: str = Form(None)):
     logger.info("Received request to /chat")
     if not audio and not text:
         logger.warning("No audio or text provided in the request")

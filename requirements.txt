@@ -7,3 +7,5 @@ groq
 faster-whisper
 python-dotenv
 python-multipart
+python-jose[cryptography]
+requests
