@@ -8,73 +8,83 @@ pinned: false
 app_port: 7860
 ---
 
-# Speech-to-Speech AI Voice Assistant
+# Multimodal AI Voice Assistant
 
-A lightweight **Speech-to-Speech (S2S)** voice assistant built with **FastAPI**, **Faster-Whisper** for speech-to-text, **Groq (Llama 3)** for natural language processing, and **gTTS** for text-to-speech.
+A lightweight **Multimodal** AI assistant built with **FastAPI**. It supports **Speech-to-Speech (S2S)**, **Text-to-Speech (T2S)**, **Speech-to-Text (S2T)**, and **Text-to-Text (T2T)** workflows using **Faster-Whisper**, **Groq (Llama 3)**, **Edge-TTS**, and **Supabase**.
 
 ## Features
 
--   **Speech-to-Speech Workflow**: Takes audio input and returns a synthesized voice response.
--   **Speech-to-Text**: Fast and accurate transcription using the `faster-whisper` base model.
--   **LLM Integration**: Intelligent responses powered by Groq's `llama-3.3-70b-versatile` model.
--   **Text-to-Speech**: Natural-sounding speech synthesis using Google Text-to-Speech (`gTTS`).
--   **REST API**: Simple FastAPI endpoint that handles both audio and text inputs.
+-   **Multimodal Workflow**: Seamlessly switch between audio and text inputs/outputs.
+-   **Conversation History**: Persistent storage of chats and messages in Supabase.
+-   **Authentication**: Secure endpoints using Supabase JWT verification.
+-   **Speech-to-Text**: Fast transcription using `faster-whisper`.
+-   **LLM Intelligence**: Context-aware responses via Groq's `llama-3.3-70b-versatile`.
+-   **Text-to-Speech**: High-quality neural voices using `edge-tts`.
+-   **Refactored Architecture**: Modular service-based structure for better maintainability.
 
 ## Project Structure
 
--   [./app.py](./app.py): Main FastAPI application and API routes.
--   [./transcribe.py](./transcribe.py): Logic for transcribing audio files using Whisper.
--   [./llm.py](./llm.py): Logic for interacting with the Groq API.
--   [./speak.py](./speak.py): Logic for converting text responses back to audio.
+-   [./app.py](./app.py): FastAPI application routes and core logic.
+-   [./config.py](./config.py): Configuration management using Pydantic Settings.
+-   [./security.py](./security.py): JWT authentication and security dependencies.
+-   [./services/](./services/):
+    -   `db.py`: Supabase database operations (history, storage).
+    -   `llm.py`: Groq API integration with history support.
+    -   `transcribe.py`: Whisper audio transcription.
+    -   `speak.py`: Edge-TTS voice synthesis.
 -   [./requirements.txt](./requirements.txt): Python dependencies.
 
 ## Setup Instructions
 
-### 1. Clone the repository
-```bash
-git clone <repository-url>
-cd voice-assistant
-```
-
-### 2. Install Dependencies
-It is recommended to use a virtual environment:
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 3. Environment Configuration
-Create a `.env` file in the root directory and add your Groq API key:
+### 1. Environment Configuration
+Create a `.env` file in the root directory:
 ```env
-GROQ_API_KEY=your_groq_api_key_here
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+SUPABASE_JWT_SECRET=your_supabase_jwt_secret
+GROQ_API_KEY=your_groq_api_key
 ```
 
-## Running the Application
+### 2. Database Setup
+Run the following SQL in your Supabase SQL Editor:
+```sql
+CREATE TABLE conversations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
 
-Start the FastAPI server using Uvicorn:
+CREATE TABLE messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    audio_base64 TEXT,
+    media_type TEXT,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+```
+
+### 3. Install & Run
 ```bash
+pip install -r requirements.txt
 uvicorn app:app --reload
 ```
-The server will be available at `http://127.0.0.1:8000`.
 
 ## API Usage
 
-### Chat Endpoint
-**Endpoint:** `POST /chat`
+### 1. Chat
+- **Endpoint:** `POST /chat`
+- **Auth:** `Bearer <Supabase_JWT>`
+- **Body (Form-Data):** `audio` (file) or `text` (string), `conversation_id` (optional).
+- **Response:** JSON containing `text`, `audio` (Base64), and `conversation_id`.
 
-**Parameters:**
-- `audio`: (Optional) An audio file (e.g., `.wav`, `.mp3`) to be transcribed.
-- `text`: (Optional) Direct text input if audio is not provided.
+### 2. List Conversations
+- **Endpoint:** `GET /conversations`
+- **Auth:** `Bearer <Supabase_JWT>`
+- **Response:** List of user conversations with message counts and headings.
 
-**Response:**
-Returns an audio file (`.wav`) containing the assistant's voice response.
-
-**Example with `curl`:**
-```bash
-curl -X POST "http://127.0.0.1:8000/chat" \
-  -F "audio=@/path/to/your/audio.wav" \
-  --output response.wav
-```
-
-
+### 3. Get Conversation
+- **Endpoint:** `GET /conversations/{id}`
+- **Auth:** `Bearer <Supabase_JWT>`
+- **Response:** Conversation details with full message history.
