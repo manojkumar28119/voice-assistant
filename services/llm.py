@@ -11,7 +11,20 @@ def get_llm_response(prompt: str, history: list = None) -> str:
     logger.info("Sending prompt to Groq...")
     try:
         messages = [
-            {"role": "system", "content": "You are a friendly, helpful, and concise voice assistant. Your responses should be natural and conversational. Avoid markdown formatting."}
+            {
+                "role": "system",
+                "content": """
+        You are a friendly voice assistant.
+
+        Rules:
+        - Keep responses short and natural for spoken conversation.
+        - Do not make assumptions about the user.
+        - If a message is unclear, ask a simple clarification question.
+        - Do not over-analyze the user's message.
+        - Respond directly to what the user said.
+        - Avoid markdown or special formatting.
+        """
+            }
         ]
         
         if history:
