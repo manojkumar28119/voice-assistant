@@ -1,65 +1,22 @@
-from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, Header, HTTPException, Depends
-from fastapi.responses import JSONResponse, FileResponse
-from transcribe import transcribe_audio
-from speak import synthesize_speech
-from llm import get_llm_response
+# voice-assistant/app.py
+from fastapi import FastAPI, UploadFile, Form, BackgroundTasks, HTTPException, Depends
+from fastapi.responses import JSONResponse
 import os
 import shutil
 import logging
 import base64
-from jose import jwt
-from dotenv import load_dotenv
-import requests
-
-load_dotenv()
+from config import settings
+from security import verify_user
+from services.transcribe import transcribe_audio
+from services.speak import synthesize_speech
+from services.llm import get_llm_response
+from services.db import get_history, store_message, create_conversation, get_conversations, get_conversation_by_id
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-if not SUPABASE_URL:
-    raise ValueError("SUPABASE_URL environment variable is not set")
-
-_jwks_cache = None
-
-def get_jwks():
-    global _jwks_cache
-    if _jwks_cache is None:
-        try:
-            url = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            _jwks_cache = response.json()
-        except Exception as e:
-            logger.error(f"Failed to fetch JWKS: {e}")
-            raise HTTPException(status_code=500, detail="Authentication service unreachable")
-    return _jwks_cache
-
-def verify_user(authorization: str = Header(None)):
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing token")
-    
-    token = authorization.split(" ")[1]
-    jwks = get_jwks()
-    
-    try:
-        unverified_header = jwt.get_unverified_header(token)
-        key = next(
-            k for k in jwks["keys"]
-            if k["kid"] == unverified_header.get("kid")
-        )
-        payload = jwt.decode(
-            token,
-            key,
-            algorithms=["ES256"],
-            audience="authenticated"
-        )
-        return payload
-    except Exception as e:
-        logger.error(f"Token validation failed: {str(e)}")
-        raise HTTPException(status_code=401, detail="Invalid token")
-app = FastAPI()
+app = FastAPI(title="Voice Assistant API")
 
 def cleanup(*file_paths: str):
     for path in file_paths:
@@ -71,43 +28,72 @@ def cleanup(*file_paths: str):
                 logger.error(f"Error deleting file {path}: {e}")
 
 @app.post("/chat")
-async def chat(background_tasks: BackgroundTasks, payload: dict = Depends(verify_user), audio: UploadFile = None, text: str = Form(None)):
+async def chat(
+    background_tasks: BackgroundTasks,
+    user_payload: dict = Depends(verify_user),
+    audio: UploadFile = None,
+    text: str = Form(None),
+    conversation_id: str = Form(None)
+):
     logger.info("Received request to /chat")
     if not audio and not text:
-        logger.warning("No audio or text provided in the request")
-        return {"error": "No audio or text provided"}
+        raise HTTPException(status_code=400, detail="No audio or text provided")
 
     audio_path = None
     if audio:
-        logger.info(f"Processing audio file: {audio.filename}")
-        os.makedirs("temp", exist_ok=True)
-        audio_path = f"temp/{audio.filename}"
+        os.makedirs(settings.TEMP_DIR, exist_ok=True)
+        audio_path = f"{settings.TEMP_DIR}/{audio.filename}"
         with open(audio_path, "wb") as buffer:
             shutil.copyfileobj(audio.file, buffer)
-        logger.info(f"Audio file saved to {audio_path}, starting transcription...")
+        
         user_input = transcribe_audio(audio_path)
-        logger.info(f"Transcription complete: '{user_input}'")
     else:
-        logger.info(f"Processing text input: '{text}'")
         user_input = text
 
-    logger.info("Requesting response from LLM...")
-    reply = get_llm_response(user_input)
-    logger.info(f"LLM reply: '{reply}'")
+    # Handle Conversation History and Message Storage
+    if not conversation_id:
+        # Create new conversation if ID not provided
+        user_id = user_payload.get("sub")
+        conversation_id = create_conversation(user_id)
+        history = []
+    else:
+        history = get_history(conversation_id)
+        
+    if conversation_id:
+        store_message(conversation_id, "user", user_input)
 
-    logger.info("Synthesizing speech...")
+    # Get Response from LLM
+    reply = get_llm_response(user_input, history)
+
+    # Synthesize Response Speech
     output_path = await synthesize_speech(reply)
-    logger.info(f"Speech synthesis complete, saved to {output_path}")
 
-    # Read the audio file and encode to base64
+    # Encode Audio to Base64
     with open(output_path, "rb") as audio_file:
         audio_base64 = base64.b64encode(audio_file.read()).decode('utf-8')
 
-    if output_path:
-        background_tasks.add_task(cleanup, audio_path, output_path)
+    if conversation_id:
+        store_message(conversation_id, "assistant", reply, audio_base64, "audio/mpeg")
 
-    return JSONResponse(content={
+    # Cleanup Background Task
+    background_tasks.add_task(cleanup, audio_path, output_path)
+    return {
         "text": reply,
         "audio": audio_base64,
-        "media_type": "audio/mpeg"
-    })
+        "media_type": "audio/mpeg",
+        "conversation_id": conversation_id
+    }
+
+@app.get("/conversations")
+async def list_conversations(user_payload: dict = Depends(verify_user)):
+    user_id = user_payload.get("sub")
+    conversations = get_conversations(user_id)
+    return conversations
+
+@app.get("/conversations/{conversation_id}")
+async def get_conversation(conversation_id: str, user_payload: dict = Depends(verify_user)):
+    user_id = user_payload.get("sub")
+    conversation = get_conversation_by_id(conversation_id, user_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return conversation

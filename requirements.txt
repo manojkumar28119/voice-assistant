@@ -9,3 +9,5 @@ python-dotenv
 python-multipart
 python-jose[cryptography]
 requests
+supabase
+pydantic-settings
